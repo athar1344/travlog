@@ -13,6 +13,8 @@ Honest trip logs with real costs, routes, and insider tips from fellow Indian tr
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
+🌐 **Live Demo:** [travlog-eight-xi.vercel.app](https://travlog-eight-xi.vercel.app/)
+
 [Getting Started](#-getting-started) · [Features](#-key-features) · [Tech Stack](#-tech-stack) · [Database Setup](#-database-setup) · [Project Structure](#-project-structure)
 
 </div>
@@ -63,6 +65,7 @@ Travlog is a community-driven travel log platform where real travelers share hon
 | Database | PostgreSQL (Supabase) | Data persistence |
 | Storage | Supabase Storage | Trip image uploads |
 | Auth | Supabase Auth | Email/password authentication |
+| Deployment | Vercel | Hosting & CI/CD |
 
 ---
 
@@ -77,8 +80,8 @@ Travlog is a community-driven travel log platform where real travelers share hon
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/travlog.git
-cd travlog
+git clone https://github.com/athar1344/Travlog.git
+cd Travlog
 
 # Install dependencies
 npm install
@@ -117,314 +120,71 @@ npm run build
 
 ## Database Setup
 
-Run these migrations in order on your Supabase project using the SQL Editor or `supabase db push`:
+Run these in order on your Supabase project using the SQL Editor:
 
-### 1. Create Core Tables
+### 1. Initial Tables
+- profiles, trip_logs, comments with RLS policies
 
-<details>
-<summary>20260503150626_create_travlog_tables.sql</summary>
+### 2. Schema Upgrade
+- transport_cost, food_cost, entry_fees, other_costs, difficulty, best_time columns
+- trip_likes table
 
-```sql
--- PROFILES
-CREATE TABLE IF NOT EXISTS profiles (
-  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  full_name text DEFAULT '',
-  avatar_url text DEFAULT NULL,
-  bio text DEFAULT NULL,
-  city text DEFAULT NULL,
-  state text DEFAULT NULL,
-  created_at timestamptz DEFAULT now()
-);
+### 3. Storage Bucket
+- trip-images public bucket with read/write policies
 
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+### 4. Photo URLs
+- photo_urls text array column on trip_logs
 
-CREATE POLICY "Authenticated can read profiles"
-  ON profiles FOR SELECT TO authenticated USING (true);
-
-CREATE POLICY "Users can insert own profile"
-  ON profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
-
-CREATE POLICY "Users can update own profile"
-  ON profiles FOR UPDATE TO authenticated
-  USING (auth.uid() = id)
-  WITH CHECK (auth.uid() = id);
-
--- TRIP_LOGS
-CREATE TABLE IF NOT EXISTS trip_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  destination_name text NOT NULL DEFAULT '',
-  state text NOT NULL DEFAULT '',
-  trip_date date NOT NULL,
-  total_cost numeric NOT NULL DEFAULT 0,
-  hotel_name text DEFAULT '',
-  hotel_cost numeric DEFAULT 0,
-  route_taken text DEFAULT '',
-  language_spoken text DEFAULT '',
-  precautions text DEFAULT '',
-  description text DEFAULT '',
-  cover_image_url text DEFAULT NULL,
-  created_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE trip_logs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public can read trip_logs"
-  ON trip_logs FOR SELECT TO anon, authenticated USING (true);
-
-CREATE POLICY "Users can insert own trips"
-  ON trip_logs FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own trips"
-  ON trip_logs FOR UPDATE TO authenticated
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
-
--- COMMENTS
-CREATE TABLE IF NOT EXISTS comments (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  trip_id uuid NOT NULL REFERENCES trip_logs(id) ON DELETE CASCADE,
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  content text NOT NULL DEFAULT '',
-  created_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public can read comments"
-  ON comments FOR SELECT TO anon, authenticated USING (true);
-
-CREATE POLICY "Users can insert own comments"
-  ON comments FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_trip_logs_user_id ON trip_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_trip_logs_created_at ON trip_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_comments_trip_id ON comments(trip_id);
-```
-
-</details>
-
-### 2. Schema Upgrade — Cost Breakdown, Difficulty, Likes
-
-<details>
-<summary>20260503153702_travlog_schema_upgrade.sql</summary>
-
-```sql
--- Add new columns to trip_logs
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trip_logs' AND column_name='transport_cost') THEN
-    ALTER TABLE trip_logs ADD COLUMN transport_cost numeric DEFAULT 0;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trip_logs' AND column_name='food_cost') THEN
-    ALTER TABLE trip_logs ADD COLUMN food_cost numeric DEFAULT 0;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trip_logs' AND column_name='entry_fees') THEN
-    ALTER TABLE trip_logs ADD COLUMN entry_fees numeric DEFAULT 0;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trip_logs' AND column_name='other_costs') THEN
-    ALTER TABLE trip_logs ADD COLUMN other_costs numeric DEFAULT 0;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trip_logs' AND column_name='difficulty') THEN
-    ALTER TABLE trip_logs ADD COLUMN difficulty text DEFAULT '';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trip_logs' AND column_name='best_time') THEN
-    ALTER TABLE trip_logs ADD COLUMN best_time text DEFAULT '';
-  END IF;
-END $$;
-
--- trip_likes table
-CREATE TABLE IF NOT EXISTS trip_likes (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  trip_id uuid NOT NULL REFERENCES trip_logs(id) ON DELETE CASCADE,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(user_id, trip_id)
-);
-
-ALTER TABLE trip_likes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public can read trip_likes"
-  ON trip_likes FOR SELECT TO anon, authenticated USING (true);
-
-CREATE POLICY "Users can insert own likes"
-  ON trip_likes FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own likes"
-  ON trip_likes FOR DELETE TO authenticated USING (auth.uid() = user_id);
-
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_trip_likes_trip_id ON trip_likes(trip_id);
-CREATE INDEX IF NOT EXISTS idx_trip_likes_user_id ON trip_likes(user_id);
-```
-
-</details>
-
-### 3. Storage Bucket & Policies
-
-<details>
-<summary>20260503153725_trip_images_storage_policy.sql</summary>
-
-```sql
--- Create the trip-images bucket (run in SQL editor)
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('trip-images', 'trip-images', true)
-ON CONFLICT (id) DO NOTHING;
-
--- Allow public read
-CREATE POLICY "Public can view trip images" ON storage.objects
-  FOR SELECT TO anon, authenticated
-  USING (bucket_id = 'trip-images');
-
--- Allow authenticated upload
-CREATE POLICY "Authenticated can upload trip images" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'trip-images');
-
--- Allow authenticated delete
-CREATE POLICY "Authenticated can delete trip images" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (bucket_id = 'trip-images');
-```
-
-</details>
-
-### 4. Add photo_urls Column
-
-<details>
-<summary>20260503160905_add_photo_urls_to_trip_logs.sql</summary>
-
-```sql
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'trip_logs' AND column_name = 'photo_urls'
-  ) THEN
-    ALTER TABLE trip_logs ADD COLUMN photo_urls text[] DEFAULT '{}';
-  END IF;
-END $$;
-```
-
-</details>
-
-### Database Schema
-
-```
-profiles
-  id          uuid    PK  REFERENCES auth.users(id)
-  full_name   text
-  avatar_url  text
-  bio         text
-  city        text
-  state       text
-  created_at  timestamptz
-
-trip_logs
-  id                uuid      PK
-  user_id           uuid      FK  REFERENCES auth.users(id)
-  destination_name  text
-  state             text
-  trip_date         date
-  total_cost        numeric
-  transport_cost    numeric
-  food_cost         numeric
-  hotel_cost        numeric
-  entry_fees        numeric
-  other_costs       numeric
-  hotel_name        text
-  route_taken       text
-  language_spoken   text
-  precautions       text
-  description       text
-  difficulty        text
-  best_time         text
-  cover_image_url   text
-  photo_urls        text[]
-  created_at        timestamptz
-
-trip_likes
-  id          uuid          PK
-  user_id     uuid          FK  REFERENCES auth.users(id)
-  trip_id     uuid          FK  REFERENCES trip_logs(id)
-  created_at  timestamptz
-  UNIQUE(user_id, trip_id)
-
-comments
-  id          uuid          PK
-  trip_id     uuid          FK  REFERENCES trip_logs(id)
-  user_id     uuid          FK  REFERENCES auth.users(id)
-  content     text
-  created_at  timestamptz
-```
+Full SQL available in the `/supabase/migrations/` folder.
 
 ---
 
 ## Project Structure
-
-```
 travlog/
 ├── public/
 ├── src/
 │   ├── components/
-│   │   ├── Footer.tsx          # Site footer with links
-│   │   ├── Navbar.tsx          # Sticky navbar with scroll effect
-│   │   └── TripCard.tsx        # 3D tilt trip card with likes
+│   │   ├── Footer.tsx
+│   │   ├── Navbar.tsx
+│   │   └── TripCard.tsx
 │   ├── context/
-│   │   └── AuthContext.tsx     # Supabase auth provider
+│   │   └── AuthContext.tsx
 │   ├── lib/
-│   │   └── supabase.ts        # Client, types, and helpers
+│   │   └── supabase.ts
 │   ├── pages/
-│   │   ├── AboutPage.tsx      # Mission & how it works
-│   │   ├── DestinationsPage.tsx # Browse by state
-│   │   ├── HomePage.tsx        # Hero + trip feed
-│   │   ├── LoginPage.tsx      # Sign in
-│   │   ├── PostTripPage.tsx   # Create / edit trip form
-│   │   ├── ProfilePage.tsx    # User profile + saved trips
-│   │   ├── SignUpPage.tsx     # Register
-│   │   └── ViewTripPage.tsx   # Full trip detail + comments
-│   ├── App.tsx                # Routes & layout
-│   ├── index.css              # Animations & global styles
-│   ├── main.tsx               # Entry point
+│   │   ├── AboutPage.tsx
+│   │   ├── DestinationsPage.tsx
+│   │   ├── HomePage.tsx
+│   │   ├── LoginPage.tsx
+│   │   ├── PostTripPage.tsx
+│   │   ├── ProfilePage.tsx
+│   │   ├── SignUpPage.tsx
+│   │   └── ViewTripPage.tsx
+│   ├── App.tsx
+│   ├── index.css
+│   ├── main.tsx
 │   └── vite-env.d.ts
 ├── supabase/
-│   └── migrations/            # SQL migrations (run in order)
-├── .env                       # Environment variables
+│   └── migrations/
+├── .env
 ├── index.html
 ├── package.json
 ├── tailwind.config.js
 ├── tsconfig.json
 └── vite.config.ts
-```
-
 ---
 
 ## Project Status
 
 - [x] **Phase 1 — Core Platform** — Auth, trip CRUD, cost breakdown, difficulty/best-time badges, photo uploads, likes, comments, verified traveler, 3D cards, animations, edit/delete, destinations page, about page
-- [ ] **Phase 2 — Social & Discovery** — Follow travelers, trip bookmarks/collections, search filters (by cost range, difficulty, season), trending trips, state-specific landing pages
-- [ ] **Phase 3 — Mobile & Offline** — PWA support, offline reading, push notifications for new trips in saved states, share trip via link/image card
-
----
-
-## Screenshots
-
-> Screenshots coming soon — the app is actively in development.
-
-| Page | Preview |
-|------|---------|
-| Homepage | *Hero with parallax, search bar, trip card grid* |
-| Trip Detail | *Full cost breakdown, photo gallery, comments* |
-| Post Trip | *Cost fields, difficulty dropdown, photo upload* |
-| Profile | *Verified badge, saved trips tab, stats* |
-| Destinations | *State cards with gradient backgrounds* |
+- [ ] **Phase 2 — Social & Discovery** — Follow travelers, search filters, trending trips, state-specific pages
+- [ ] **Phase 3 — Mobile & Offline** — PWA support, offline reading, push notifications, share trip cards
 
 ---
 
 ## About
 
-Travlog was born in the Yana Caves of Karnataka, India — standing inside those limestone formations, surrounded by the kind of raw beauty that no Instagram filter could improve, the idea hit: what if there was a place where travelers shared the *real* story? Not the polished highlight reel, but the actual cost of the bus from Bangalore, the name of the guesthouse that had hot water, the warning about the leeches on the monsoon trail.
+Travlog was born in the Yana Caves of Karnataka, India — standing inside those limestone formations, surrounded by raw beauty that no Instagram filter could improve, the idea hit: what if there was a place where travelers shared the real story? Not the polished highlight reel, but the actual cost of the bus from Bangalore, the name of the guesthouse that had hot water, the warning about the leeches on the monsoon trail.
 
 That's Travlog. Your friend who went there first.
 
@@ -432,7 +192,7 @@ That's Travlog. Your friend who went there first.
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ---
 
@@ -440,6 +200,6 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 Built with care by travelers, for travelers.
 
-**[Report a Bug](https://github.com/your-username/travlog/issues)** · **[Request a Feature](https://github.com/your-username/travlog/issues)** · **[Contribute](https://github.com/your-username/travlog/pulls)**
+**[Report a Bug](https://github.com/athar1344/Travlog/issues)** · **[Request a Feature](https://github.com/athar1344/Travlog/issues)** · **[Contribute](https://github.com/athar1344/Travlog/pulls)**
 
 </div>
